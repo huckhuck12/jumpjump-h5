@@ -51,6 +51,27 @@ npm run build
 npm run preview
 ```
 
+## 🌐 在线演示
+
+访问 GitHub Pages 在线体验游戏：
+**https://huckhuck12.github.io/jumpjump-h5/**
+
+### 手动启用 GitHub Pages
+
+如果在线演示未生效，请按以下步骤手动启用：
+
+1. 访问仓库的 Settings 页面
+2. 左侧菜单选择 "Pages"
+3. Source 选择 "Deploy from a branch"
+4. Branch 选择 "gh-pages" 分支，文件夹选择 "/(root)"
+5. 点击 Save，等待几分钟部署完成
+
+### 本地部署到 GitHub Pages
+
+```bash
+npm run deploy
+```
+
 ## 🎯 游戏玩法
 
 1. 点击"开始游戏"按钮
