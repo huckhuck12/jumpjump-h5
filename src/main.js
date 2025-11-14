@@ -308,13 +308,18 @@ function landOnStage(stageBody, contact) {
 
 // 更新玩家朝向
 function updatePlayerRotation() {
-  // 根据跳跃方向旋转玩家
+  // Unity使用 transform.right = _direction
+  // 在Three.js中，我们需要让玩家的右侧（局部X轴）指向跳跃方向
+  // 这意味着玩家的身体朝向应该垂直于跳跃方向
+  
   if (Math.abs(gameState.direction.x) > 0.5) {
-    // 沿X轴方向
-    playerMesh.rotation.y = gameState.direction.x > 0 ? 0 : Math.PI
+    // 跳跃方向是X轴，玩家应该面向Z轴
+    // 如果direction.x > 0（向右跳），玩家右侧应该指向+X，所以玩家面向+Z
+    playerMesh.rotation.y = gameState.direction.x > 0 ? Math.PI / 2 : -Math.PI / 2
   } else if (Math.abs(gameState.direction.z) > 0.5) {
-    // 沿Z轴方向
-    playerMesh.rotation.y = gameState.direction.z > 0 ? Math.PI / 2 : -Math.PI / 2
+    // 跳跃方向是Z轴，玩家应该面向X轴
+    // 如果direction.z > 0（向前跳），玩家右侧应该指向+Z，所以玩家面向-X
+    playerMesh.rotation.y = gameState.direction.z > 0 ? Math.PI : 0
   }
 }
 
