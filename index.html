@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>跳一跳 - Jump Jump</title>
+  </head>
+  <body>
+    <div id="game-container"></div>
+    <div id="ui-overlay">
+      <div id="score-display">分数: <span id="score">0</span></div>
+      <div id="single-score" class="single-score"></div>
+      <div id="start-panel" class="panel">
+        <h1>跳一跳</h1>
+        <p>按住鼠标/触摸屏幕蓄力</p>
+        <p>落点越靠近中心，分数翻倍！</p>
+        <button id="start-btn">开始游戏</button>
+      </div>
+      <div id="game-over-panel" class="panel" style="display: none;">
+        <h2>游戏结束</h2>
+        <p>最终分数: <span id="final-score">0</span></p>
+        <button id="restart-btn">重新开始</button>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
