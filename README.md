@@ -2,6 +2,9 @@
 
 基于 Three.js 和 Cannon.js 开发的 3D 跳一跳小游戏，完美复刻微信跳一跳玩法。
 
+> 🤖 本项目由 [Qoder AI](https://qoder.bytedance.net/) 辅助开发生成  
+> 📦 复刻自 Unity 版本：[Unity-JumpJump](https://github.com/zhenghongzhi/Unity-JumpJump)
+
 ## 🎮 游戏特性
 
 - ✨ 完整的 3D 场景渲染
@@ -118,10 +121,11 @@ jumpjump-h5/
 - 碰撞到台子侧面
 - 落在两个台子之间
 
-## 🤝 参考项目
+## 🤝 致谢
 
-本项目参考了 Unity 版本的跳一跳游戏：
-- [Unity-JumpJump](https://github.com/zhenghongzhi/Unity-JumpJump)
+- **原始项目**：本项目完整复刻自 [Unity-JumpJump](https://github.com/zhenghongzhi/Unity-JumpJump)，感谢原作者 [@zhenghongzhi](https://github.com/zhenghongzhi) 的优秀作品
+- **开发工具**：使用 [Qoder AI](https://qoder.bytedance.net/) 进行代码生成和开发辅助
+- **技术参考**：Unity C# 代码逻辑完整转换为 JavaScript + Three.js 实现
 
 ## 📄 开源协议
 
