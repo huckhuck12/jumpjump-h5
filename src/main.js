@@ -5,11 +5,24 @@ import * as CANNON from 'cannon-es'
 // 游戏配置
 const config = {
   jumpFactor: 5,
-  maxDistance: 5,
-  minDistance: 1.5,
+  maxDistance: 5,        // 适度缩短（5 → 4），保留挑战性
+  minDistance: 3,      // 适度缩短（1.5 → 1.3）
   gravity: -30,
   playerSize: 0.5,
   playerMass: 1,
+  // 跳跃参数优化
+  minPressTime: 0.05,    // 降低最小蓄力时间
+  maxPressTime: 1.5,     // 添加最大蓄力时间
+  horizontalForce: 10,   // 水平力度（增加到10）
+  verticalForce: 12,     // 垂直力度（增加到12）
+  // 台子尺寸
+  minStageSize: 0.9,     // 适度增大（0.8 → 0.9）
+  maxStageSize: 1.3,     // 保持挑战性
+  // 辅助线配置
+  showGuideLine: true,   // 是否显示辅助线
+  guideLineOpacity: 0.5, // 辅助线透明度
+  // 轨迹预测补偿（小力度时需要的额外系数）
+  trajectoryCompensation: 1.0,  // 实际跳跃距离比预测短，需要补偿
 }
 
 // 游戏状态
@@ -32,6 +45,9 @@ let playerMesh, playerBody
 let world
 let stages = []
 let particleSystem
+let cameraAnimationId = null
+let squashAnimationId = null
+let guideLine = null  // 辅助线
 
 // UI 元素
 const scoreElement = document.getElementById('score')
@@ -98,6 +114,9 @@ function initScene() {
   // 创建粒子系统
   createParticleSystem()
 
+  // 创建辅助线
+  createGuideLine()
+
   // 窗口大小调整
   window.addEventListener('resize', onWindowResize)
 }
@@ -124,6 +143,107 @@ function createParticleSystem() {
   particleSystem = new THREE.Points(particles, particleMaterial)
   particleSystem.visible = false
   scene.add(particleSystem)
+}
+
+// 创建辅助线（从玩家指向预测落点）
+function createGuideLine() {
+  // 使用更多点来绘制抛物线轨迹
+  const segmentCount = 20
+  const points = []
+  for (let i = 0; i <= segmentCount; i++) {
+    points.push(new THREE.Vector3(0, 0, 0))
+  }
+  const geometry = new THREE.BufferGeometry().setFromPoints(points)
+  const material = new THREE.LineBasicMaterial({
+    color: 0xFFFF00,  // 黄色
+    transparent: true,
+    opacity: config.guideLineOpacity,
+    linewidth: 2,
+  })
+  guideLine = new THREE.Line(geometry, material)
+  guideLine.visible = false
+  scene.add(guideLine)
+}
+
+// 更新辅助线位置（显示抛物线轨迹）
+function updateGuideLine(pressTime = 0) {
+  if (!config.showGuideLine || !guideLine || !gameState.nextStage || !playerBody) {
+    if (guideLine) guideLine.visible = false
+    return
+  }
+
+  // 计算当前蓄力时间对应的跳跃参数
+  const clampedPressTime = Math.max(config.minPressTime, Math.min(pressTime, config.maxPressTime))
+  const pressRatio = Math.sqrt(clampedPressTime / config.maxPressTime)
+  const horizontalSpeed = pressRatio * config.horizontalForce
+  const verticalSpeed = pressRatio * config.verticalForce
+
+  // 计算跳跃方向
+  const playerPos = new THREE.Vector3(
+    playerBody.position.x,
+    playerBody.position.y,
+    playerBody.position.z
+  )
+  const targetPos = new THREE.Vector3(
+    gameState.nextStage.body.position.x,
+    0,
+    gameState.nextStage.body.position.z
+  )
+  const direction = new THREE.Vector3().subVectors(targetPos, new THREE.Vector3(playerPos.x, 0, playerPos.z)).normalize()
+
+  // 计算初始速度（加入补偿系数）
+  // 小力度时需要更大的补偿，大力度时补偿较小
+  const compensation = config.trajectoryCompensation - (pressRatio * 0.15)  // 力度越大，补偿越小
+  let vx = direction.x * horizontalSpeed * compensation
+  let vy = verticalSpeed
+  let vz = direction.z * horizontalSpeed * compensation
+
+  // 绘制抛物线轨迹（模拟物理引擎的实际行为）
+  const segmentCount = 20
+  const positions = guideLine.geometry.attributes.position.array
+  const physicsStep = 1 / 60  // 物理引擎的固定时间步长
+  const stepsPerSegment = 3  // 每段轨迹模拟3个物理步
+  const damping = 0.3    // 线性阻尼（与playerBody一致）
+
+  let currentX = playerPos.x
+  let currentY = playerPos.y + 0.1  // 加上跳跃时的向上偏移
+  let currentZ = playerPos.z
+
+  for (let i = 0; i <= segmentCount; i++) {
+    positions[i * 3] = currentX
+    positions[i * 3 + 1] = currentY
+    positions[i * 3 + 2] = currentZ
+
+    // 如果落到台子高度以下，停止绘制
+    if (currentY <= 0.5) {
+      // 剩余的点都设置到最后一个点
+      for (let j = i + 1; j <= segmentCount; j++) {
+        positions[j * 3] = currentX
+        positions[j * 3 + 1] = 0.5
+        positions[j * 3 + 2] = currentZ
+      }
+      break
+    }
+
+    // 模拟多个物理步（更准确）
+    for (let step = 0; step < stepsPerSegment; step++) {
+      // 更新速度（重力）
+      vy += config.gravity * physicsStep
+
+      // 阻尼（Cannon.js的阻尼：v *= 1 - damping * dt）
+      const dampingFactor = 1 - damping * physicsStep
+      vx *= dampingFactor
+      vz *= dampingFactor
+
+      // 更新位置
+      currentX += vx * physicsStep
+      currentY += vy * physicsStep
+      currentZ += vz * physicsStep
+    }
+  }
+
+  guideLine.geometry.attributes.position.needsUpdate = true
+  guideLine.visible = true
 }
 
 // 创建玩家
@@ -167,7 +287,8 @@ function createPlayer(position) {
 // 创建台子
 function createStage(position, isFirst = false) {
   const isCircle = !isFirst && Math.random() > 0.5
-  const size = isFirst ? 1.5 : Math.random() * 0.5 + 0.8
+  // 使用config中的配置，增大台子尺寸
+  const size = isFirst ? 1.5 : Math.random() * (config.maxStageSize - config.minStageSize) + config.minStageSize
   const height = 0.5
 
   let geometry
@@ -210,21 +331,31 @@ function createStage(position, isFirst = false) {
 function spawnNextStage() {
   if (!gameState.currentStage) return
 
+  // 使用台子的中心位置（Y=0的平面投影）
   const currentPos = gameState.currentStage.body.position
+  const currentCenter = new THREE.Vector3(currentPos.x, 0, currentPos.z)
   const distance = Math.random() * (config.maxDistance - config.minDistance) + config.minDistance
 
-  // 随机方向（X轴或Z轴）
-  gameState.direction = Math.random() > 0.5
-    ? new THREE.Vector3(1, 0, 0)
-    : new THREE.Vector3(0, 0, 1)
+  // 随机选择轴向和方向，但避免往回跳
+  let newDirection
+  do {
+    const axis = Math.random() > 0.5 ? 'x' : 'z'
+    const sign = Math.random() > 0.5 ? 1 : -1
+    newDirection = axis === 'x'
+      ? new THREE.Vector3(sign, 0, 0)
+      : new THREE.Vector3(0, 0, sign)
+  } while (newDirection.dot(gameState.direction) < -0.5) // 避免方向相反
 
   const nextPos = new THREE.Vector3(
-    currentPos.x + gameState.direction.x * distance,
+    currentCenter.x + newDirection.x * distance,
     0,
-    currentPos.z + gameState.direction.z * distance
+    currentCenter.z + newDirection.z * distance
   )
 
   gameState.nextStage = createStage(nextPos)
+
+  // 更新跳跃方向为指向新台子的方向（归一化到轴向）
+  gameState.direction = newDirection
 }
 
 // 玩家碰撞处理
@@ -264,14 +395,24 @@ function landOnStage(stageBody, contact) {
   playerBody.velocity.set(0, playerBody.velocity.y * 0.3, 0)
   playerBody.angularVelocity.set(0, 0, 0)
 
-  gameState.currentStage = gameState.nextStage
-  gameState.nextStage = null
+  // 关键修复：保存旧的nextStage，它将成为新的currentStage
+  const newCurrentStage = gameState.nextStage
 
-  // 计算精准度
+  // 临时更新currentStage用于生成新台子（但不影响gameState.nextStage）
+  const tempCurrentStage = gameState.currentStage
+  gameState.currentStage = newCurrentStage
+
+  // 基于新的currentStage生成下一个台子（这会更新gameState.nextStage）
+  spawnNextStage()
+
+  // 计算精准度 - 使用正确的碰撞点
+  const contactPoint = new CANNON.Vec3()
+  contact.bi.pointToWorldFrame(contact.ri, contactPoint)
+
   const hitPoint = new THREE.Vector3(
-    contact.bi.position.x,
+    contactPoint.x,
     0,
-    contact.bi.position.z
+    contactPoint.z
   )
   const stageCenter = new THREE.Vector3(
     stageBody.position.x,
@@ -291,11 +432,23 @@ function landOnStage(stageBody, contact) {
   updateScore()
   showScoreAnimation(gameState.lastReward)
 
-  // 生成下一个台子（这会更新 gameState.direction）
-  spawnNextStage()
-
-  // 更新玩家朝向，让玩家面向下一个台子的方向
-  updatePlayerRotation()
+  // 然后根据玩家当前位置和新台子位置更新玩家朝向
+  if (gameState.nextStage) {
+    const playerPos = new THREE.Vector3(
+      playerBody.position.x,
+      0,
+      playerBody.position.z
+    )
+    const targetPos = new THREE.Vector3(
+      gameState.nextStage.body.position.x,
+      0,
+      gameState.nextStage.body.position.z
+    )
+    // 计算实际方向并更新玩家朝向
+    const actualDirection = new THREE.Vector3().subVectors(targetPos, playerPos).normalize()
+    const angle = Math.atan2(-actualDirection.z, actualDirection.x)
+    playerMesh.rotation.y = angle
+  }
 
   // 移动相机
   moveCamera()
@@ -310,17 +463,11 @@ function landOnStage(stageBody, contact) {
 function updatePlayerRotation() {
   // Unity使用 transform.right = _direction
   // 在Three.js中，我们需要让玩家的右侧（局部X轴）指向跳跃方向
-  // 这意味着玩家的身体朝向应该垂直于跳跃方向
-  
-  if (Math.abs(gameState.direction.x) > 0.5) {
-    // 跳跃方向是X轴，玩家应该面向Z轴
-    // 如果direction.x > 0（向右跳），玩家右侧应该指向+X，所以玩家面向+Z
-    playerMesh.rotation.y = gameState.direction.x > 0 ? Math.PI / 2 : -Math.PI / 2
-  } else if (Math.abs(gameState.direction.z) > 0.5) {
-    // 跳跃方向是Z轴，玩家应该面向X轴
-    // 如果direction.z > 0（向前跳），玩家右侧应该指向+Z，所以玩家面向-X
-    playerMesh.rotation.y = gameState.direction.z > 0 ? Math.PI : 0
-  }
+  // 默认情况下，Three.js中物体的右侧是+X，前方是-Z
+  // 我们需要计算从默认右侧(1,0,0)到目标方向的旋转角度
+
+  const angle = Math.atan2(gameState.direction.z, gameState.direction.x)
+  playerMesh.rotation.y = angle
 }
 
 // 更新分数显示
@@ -355,10 +502,16 @@ function getScreenPosition(position) {
 // 移动相机
 function moveCamera() {
   const targetPos = playerMesh.position.clone().add(gameState.cameraOffset)
-  animateCameraMove(camera.position, targetPos, 1000)
+  animateCameraMove(camera.position.clone(), targetPos, 1000)
 }
 
 function animateCameraMove(from, to, duration) {
+  // 取消之前的相机动画，防止冲突
+  if (cameraAnimationId) {
+    cancelAnimationFrame(cameraAnimationId)
+    cameraAnimationId = null
+  }
+
   const startTime = Date.now()
 
   function update() {
@@ -370,7 +523,9 @@ function animateCameraMove(from, to, duration) {
     camera.lookAt(playerMesh.position)
 
     if (progress < 1) {
-      requestAnimationFrame(update)
+      cameraAnimationId = requestAnimationFrame(update)
+    } else {
+      cameraAnimationId = null
     }
   }
 
@@ -383,15 +538,47 @@ function easeInOutQuad(t) {
 
 // 跳跃
 function jump(pressTime) {
-  const force = pressTime * config.jumpFactor
-  const direction = gameState.direction.clone().normalize()
-  const impulse = new CANNON.Vec3(
-    direction.x * force,
-    5,
-    direction.z * force
-  )
+  // 限制蓄力时间范围，提供更好的手感
+  const clampedPressTime = Math.max(config.minPressTime, Math.min(pressTime, config.maxPressTime))
 
-  playerBody.applyImpulse(impulse, playerBody.position)
+  // 使用平方根曲线使手感更线性（物理距离 ∝ v²，所以用√让手感线性化）
+  const pressRatio = Math.sqrt(clampedPressTime / config.maxPressTime)
+
+  // 根据玩家当前位置和目标台子位置计算实际跳跃方向
+  let direction
+  if (gameState.nextStage) {
+    const playerPos = new THREE.Vector3(
+      playerBody.position.x,
+      0,
+      playerBody.position.z
+    )
+    const targetPos = new THREE.Vector3(
+      gameState.nextStage.body.position.x,
+      0,
+      gameState.nextStage.body.position.z
+    )
+
+    // 计算从玩家当前位置到目标台子的方向
+    direction = new THREE.Vector3().subVectors(targetPos, playerPos).normalize()
+  } else {
+    // 如果没有目标台子，使用预设方向
+    direction = gameState.direction.clone().normalize()
+  }
+
+  // 根据蓄力比例计算速度（线性插值）
+  const horizontalSpeed = pressRatio * config.horizontalForce
+  const verticalSpeed = pressRatio * config.verticalForce
+
+  // 关键修复：先将玩家位置向上提升一点点，脱离台子表面
+  // 这样可以避免碰撞力立即抵消速度
+  playerBody.position.y += 0.1
+
+  // 直接设置速度
+  playerBody.velocity.set(
+    direction.x * horizontalSpeed,
+    verticalSpeed,
+    direction.z * horizontalSpeed
+  )
 
   // 重置着陆标志，允许下次着陆
   gameState.isLanding = false
@@ -428,6 +615,12 @@ function updateSquashEffect(pressTime) {
 
 // 还原压缩效果
 function resetSquashEffect() {
+  // 取消之前的还原动画，防止冲突
+  if (squashAnimationId) {
+    cancelAnimationFrame(squashAnimationId)
+    squashAnimationId = null
+  }
+
   const duration = 200
   const startTime = Date.now()
 
@@ -461,7 +654,9 @@ function resetSquashEffect() {
     }
 
     if (progress < 1) {
-      requestAnimationFrame(update)
+      squashAnimationId = requestAnimationFrame(update)
+    } else {
+      squashAnimationId = null
     }
   }
 
@@ -484,16 +679,24 @@ function startGame() {
   gameState.lastReward = 1
   updateScore()
 
-  // 清除旧场景
+  // 清除旧场景（包括释放内存）
   stages.forEach(stage => {
     scene.remove(stage.mesh)
     world.removeBody(stage.body)
+    // 释放几何体和材质，防止内存泄漏
+    if (stage.mesh.geometry) stage.mesh.geometry.dispose()
+    if (stage.mesh.material) stage.mesh.material.dispose()
   })
   stages = []
 
   if (playerMesh) {
     scene.remove(playerMesh)
     world.removeBody(playerBody)
+    // 释放玩家的几何体和材质
+    playerMesh.userData.body.geometry.dispose()
+    playerMesh.userData.body.material.dispose()
+    playerMesh.userData.head.geometry.dispose()
+    playerMesh.userData.head.material.dispose()
   }
 
   // 创建初始台子和玩家
@@ -506,6 +709,19 @@ function startGame() {
 
   // 生成第一个目标台子
   spawnNextStage()
+
+  // 初始化玩家朝向，根据玩家位置和目标台子计算
+  if (gameState.nextStage) {
+    const playerPos = new THREE.Vector3(0, 0, 0)
+    const targetPos = new THREE.Vector3(
+      gameState.nextStage.body.position.x,
+      0,
+      gameState.nextStage.body.position.z
+    )
+    const actualDirection = new THREE.Vector3().subVectors(targetPos, playerPos).normalize()
+    const angle = Math.atan2(-actualDirection.z, actualDirection.x)
+    playerMesh.rotation.y = angle
+  }
 
   // 重置相机
   camera.position.copy(gameState.cameraOffset)
@@ -521,6 +737,16 @@ let mouseDownTime = 0
 
 function onMouseDown() {
   if (!gameState.isPlaying) return
+
+  // 检查玩家是否在台子上（位置检查而非速度检查）
+  if (gameState.currentStage) {
+    const stageTop = gameState.currentStage.body.position.y + gameState.currentStage.height / 2
+    const onStage = Math.abs(playerBody.position.y - stageTop - config.playerSize) < 0.15
+
+    // 只有站在台子上才能蓄力
+    if (!onStage) return
+  }
+
   gameState.isPressing = true
   mouseDownTime = Date.now()
   particleSystem.visible = true
@@ -552,6 +778,20 @@ function animate() {
   // 同步玩家位置
   if (playerMesh && playerBody) {
     playerMesh.position.copy(playerBody.position)
+
+    // 只有在台子上时才锁定水平位置（检查Y位置接近台子高度）
+    if (gameState.isPlaying && gameState.currentStage) {
+      const stageTop = gameState.currentStage.body.position.y + gameState.currentStage.height / 2
+      const onStage = Math.abs(playerBody.position.y - stageTop - config.playerSize) < 0.1
+
+      // 只有确实站在台子上时才清零水平速度
+      if (onStage && Math.abs(playerBody.velocity.y) < 0.5) {
+        playerBody.velocity.x = 0
+        playerBody.velocity.z = 0
+        playerBody.angularVelocity.set(0, 0, 0)
+      }
+    }
+
     // 不同步旋转，保持玩家直立
     // playerMesh.quaternion.copy(playerBody.quaternion)
 
@@ -571,14 +811,20 @@ function animate() {
     const pressTime = (Date.now() - mouseDownTime) / 1000
     updateSquashEffect(pressTime)
 
-    // 更新粒子位置
-    if (gameState.currentStage) {
+    // 更新粒子位置（跟随玩家而非台子中心）
+    if (playerMesh) {
       particleSystem.position.set(
-        gameState.currentStage.body.position.x,
-        gameState.currentStage.body.position.y + 0.5,
-        gameState.currentStage.body.position.z
+        playerMesh.position.x,
+        playerMesh.position.y - config.playerSize,
+        playerMesh.position.z
       )
     }
+
+    // 更新辅助线（传入当前蓄力时间）
+    updateGuideLine(pressTime)
+  } else {
+    // 不蓄力时隐藏辅助线
+    if (guideLine) guideLine.visible = false
   }
 
   renderer.render(scene, camera)
